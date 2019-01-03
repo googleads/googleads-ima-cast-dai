@@ -3,7 +3,6 @@
 /**
  * Entry point for the sample video player which uses media element for
  * rendering video streams.
- *
  * @this {Player}
  * @param {!HTMLMediaElement} mediaElement for video rendering.
  */
@@ -13,6 +12,7 @@ const Player = function(mediaElement) {
   this.castPlayer_ = null;
   this.seekToTimeAfterAdBreak_ = 0;
   this.startTime_ = 0;
+  this.streamFormat_ = google.ima.dai.api.StreamRequest.StreamFormat.HLS;
   this.needsCredentials_ = false;
   this.adIsPlaying_ = false;
   this.mediaElement_ = mediaElement;
@@ -182,7 +182,7 @@ Player.prototype.getContentTime_ = function() {
 
 /**
  * Sends messages to all connected sender apps.
- * @param {!string} message Message to be sent to senders.
+ * @param {string} message Message to be sent to senders.
  * @private
  */
 Player.prototype.broadcast_ = function(message) {
@@ -234,6 +234,8 @@ Player.prototype.onLoad = function(event) {
    */
   const imaRequestData = event.data.media.customData;
   this.startTime_ = imaRequestData.startTime;
+  this.streamFormat_ = imaRequestData.format ||
+      google.ima.dai.api.StreamRequest.StreamFormat.HLS;
   this.needsCredentials_ = imaRequestData.needsCredentials;
   if (imaRequestData.assetKey) {
     this.streamRequest =
@@ -261,9 +263,10 @@ Player.prototype.onSeek = function(event) {
 
 /**
  * Loads stitched ads+content stream.
- * @param {!string} url of the stream.
+ * @param {string} url of the stream.
  */
 Player.prototype.onStreamDataReceived = function(url) {
+  cast.player.api.setLoggerLevel(cast.player.api.LoggerLevel.DEBUG);
   const self = this;
   const currentTime = this.startTime_ > 0 ? this.streamManager_
     .streamTimeForContentTime(this.startTime_) : 0;
@@ -275,6 +278,10 @@ Player.prototype.onStreamDataReceived = function(url) {
   });
   this.broadcast_('onStreamDataReceived: ' + url);
 
+  const errorCallback = function(errorCode, requestStatus) {
+    console.log('Error: ' + errorCode);
+    console.log(requestStatus);
+  };
   const processMetadataCallback = function(type, data, timestamp) {
     self.streamManager_.processMetadata(type, data, timestamp);
   };
@@ -297,13 +304,26 @@ Player.prototype.onStreamDataReceived = function(url) {
     }
   };
 
+  host.onError = errorCallback;
   host.processMetadata = processMetadataCallback;
   host.updateManifestRequestInfo = updateManifestRequestInfoCallback;
   host.updateLicenseRequestInfo = updateLicenseRequestInfoCallback;
   host.updateSegmentRequestInfo = updateSegmentRequestInfoCallback;
+
+  let protocol;
+  switch (this.streamFormat_) {
+    case google.ima.dai.api.StreamRequest.StreamFormat.DASH:
+      protocol = cast.player.api.CreateDashStreamingProtocol(host);
+      break;
+    case google.ima.dai.api.StreamRequest.StreamFormat.HLS:
+      protocol = cast.player.api.CreateHlsStreamingProtocol(host);
+      break;
+    default:
+      console.error('Unsupported stream format: ' + this.streamFormat_);
+      break;
+  }
   this.castPlayer_ = new cast.player.api.Player(host);
-  this.castPlayer_.load(
-    cast.player.api.CreateHlsStreamingProtocol(host), currentTime);
+  this.castPlayer_.load(protocol, currentTime);
   if (this.subtitles[0] && this.subtitles[0].ttml) {
     this.castPlayer_.enableCaptions(true, 'ttml', this.subtitles[0].ttml);
   }

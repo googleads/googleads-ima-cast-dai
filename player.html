@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<html manifest="nocache.mf">
 <head>
   <title>Receiver Demo</title>
   <script type="text/javascript" src="//www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
@@ -17,6 +18,9 @@
     <span id='ad-position'>1</span> of
     <span id='total-ads'>1</span> Remaining time:
     <span id='time-value'>0</span> s
+  </div>
+  <div id='watermark_wrapper' style='position: absolute; left: 0; top: 50px; right: 0; bottom: 0; opacity: 0.5; z-index: 99; font-size: xx-large; text-align: center;'>
+    SAMPLE IMA DAI RECEIVER - NOT FOR PRODUCTION USE
   </div>
   <script>
     var player = new Player(document.getElementById('mediaElement'));
