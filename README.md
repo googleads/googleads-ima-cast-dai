@@ -17,7 +17,7 @@ For more information, see the documentation at https://developers.google.com/int
 ### Announcements and Updates
 For API and client library updates and news, please follow our [Google+ Ads Developers page](https://plus.google.com/+GoogleAdsDevelopers/posts) and our [Google Ads Developers blog](http://googleadsdeveloper.blogspot.com/)
 
-Copyright 2018 Google LLC
+Copyright 2020 Google LLC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

@@ -1,375 +1,337 @@
 'use strict';
 
-/**
- * Entry point for the sample video player which uses media element for
- * rendering video streams.
- * @this {Player}
- * @param {!HTMLMediaElement} mediaElement for video rendering.
- */
-const Player = function(mediaElement) {
-  const namespace = 'urn:x-cast:com.google.ads.interactivemedia.dai.cast';
-  const self = this;
-  this.castPlayer_ = null;
-  this.seekToTimeAfterAdBreak_ = 0;
-  this.startTime_ = 0;
-  this.streamFormat_ = google.ima.dai.api.StreamRequest.StreamFormat.HLS;
-  this.needsCredentials_ = false;
-  this.adIsPlaying_ = false;
-  this.mediaElement_ = mediaElement;
-  this.receiverManager_ = cast.receiver.CastReceiverManager.getInstance();
-  this.receiverManager_.onSenderConnected = function(event) {
-    console.log('Sender Connected');
-  };
-  this.receiverManager_.onSenderDisconnected =
-      this.onSenderDisconnected.bind(this);
-  this.imaMessageBus_ = this.receiverManager_.getCastMessageBus(namespace);
-  this.imaMessageBus_.onMessage = function(event) {
-    console.log('Received message from sender: ' + event.data);
-    const message = event.data.split(',');
-    const method = message[0];
+const NAMESPACE = 'urn:x-cast:com.google.ads.ima.cast';
+
+class Player {
+  /**
+   * Represents the receiver
+   * @param {!Object} mediaElement - the cast media player element
+   */
+  constructor(mediaElement) {
+    /**
+     * the fallback stream to play if loading fails
+     * @type {string}
+     * @private
+     * @const
+     */
+    this.backupStream_ = 'http://storage.googleapis.com/testtopbox-public/' +
+        'video_content/bbb/master.m3u8';
+
+    /**
+     * the cast context object provided by the CAF framework.
+     * @type {!Object}
+     * @private
+     * @const
+     */
+    this.castContext_ = cast.framework.CastReceiverContext.getInstance();
+
+    /**
+     * the player manager object, provided by the CAF framework.
+     * @type {!Object}
+     * @private
+     * @const
+     */
+    this.playerManager_ = this.castContext_.getPlayerManager();
+
+    /**
+     * the video player contained within the cast media player element.
+     * @type {!HTMLMediaElement}
+     * @private
+     * @const
+     */
+    this.mediaElement_ = mediaElement.getMediaElement();
+
+    /**
+     * This is the stream manager object for IMA SDK.
+     * @type {?Object}
+     * @private
+     */
+    this.streamManager_ = null;
+
+    /**
+     * Stores the timestamp where playback will start, in seconds, for
+     * bookmarking.
+     * @type {number}
+     * @private
+     */
+    this.startTime_ = 0;
+
+    /**
+     * Stores a flag to identify whether an ad is currently playing.
+     * @type {boolean}
+     * @private
+     */
+    this.adIsPlaying_ = false;
+
+    /**
+     * Stores the timestamp to seek to when ad completes, for snapback.
+     * -1 indicates that snapback has not been requested.
+     * @type {number}
+     * @private
+     */
+    this.seekToTimeAfterAdBreak_ = -1;
+  }
+
+  /** Initializes CAF and IMA SDK */
+  initialize() {
+    // Map of namespace names to their types.
+    const options = new cast.framework.CastReceiverOptions();
+    options.customNamespaces = {};
+    options.customNamespaces[NAMESPACE] =
+        cast.framework.system.MessageType.STRING;
+    this.castContext_.start(options);
+    this.streamManager_ =
+        new google.ima.dai.api.StreamManager(this.mediaElement_);
+  }
+
+  /** Attaches event listeners and other callbacks. */
+  setupCallbacks() {
+    // Receives messages from sender app.
+    this.castContext_.addCustomMessageListener(NAMESPACE, (event) => {
+      this.processSenderMessage_(event.data);
+    });
+
+    this.attachPlayerManagerCallbacks_();
+    this.attachStreamManagerListeners_();
+  }
+
+  /**
+   * Parses messages from sender apps. The message is a comma separated
+   * string consisting of a function name followed by a set of parameters.
+   * @param {string} message - The raw message from the sender app.
+   * @private
+   */
+  processSenderMessage_(message) {
+    console.log('Received message from sender: ' + message);
+    const messageArray = message.split(',');
+    const method = messageArray[0];
     switch (method) {
       case 'bookmark':
-        let time = parseFloat(message[1]);
-        self.bookmark_(time);
-        break;
-      case 'seek':
-        time = parseFloat(message[1]);
-        self.seek_(time);
-        break;
-      case 'snapback':
-        time = parseFloat(message[1]);
-        self.snapback_(time);
+        const time = parseFloat(messageArray[1]);
+        const bookmarkTime =
+            this.streamManager_.contentTimeForStreamTime(time);
+        this.broadcast('bookmark,' + bookmarkTime);
+        this.bookmark(time);
         break;
       case 'getContentTime':
-        const contentTime = self.getContentTime_();
-        self.broadcast_('contentTime,' + contentTime);
+        const contentTime = this.getContentTime();
+        this.broadcast('contentTime,' + contentTime);
         break;
       default:
-        self.broadcast_('Message not recognized');
+        this.broadcast('Message not recognized');
         break;
     }
-  };
-
-  this.mediaManager_ = new cast.receiver.MediaManager(this.mediaElement_);
-  this.mediaManager_.onLoad = this.onLoad.bind(this);
-  this.mediaManager_.onSeek = this.onSeek.bind(this);
-  this.initStreamManager_();
-};
-
-/**
- * Initializes receiver stream manager and adds callbacks.
- * @private
- */
-Player.prototype.initStreamManager_ = function() {
-  const self = this;
-  this.streamManager_ =
-      new google.ima.dai.api.StreamManager(this.mediaElement_);
-  const onStreamDataReceived = this.onStreamDataReceived.bind(this);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.LOADED,
-      function(event) {
-        const streamUrl = event.getStreamData().url;
-        // Each element in subtitles array is an object with url and language
-        // properties. Example of a subtitles array with 2 elements:
-        // {
-        //   "url": "http://www.sis.com/1234/subtitles_en.ttml",
-        //   "language": "en"
-        // }, {
-        //   "url": "http://www.sis.com/1234/subtitles_fr.ttml",
-        //   "language": "fr"
-        // }
-        self.subtitles = event.getStreamData().subtitles;
-        onStreamDataReceived(streamUrl);
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.STREAM_INITIALIZED,
-      function(event) {
-        self.broadcast_('streamInit');
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.ERROR,
-      function(event) {
-        const errorMessage = event.getStreamData().errorMessage;
-        self.broadcast_(errorMessage);
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.CUEPOINTS_CHANGED,
-      function(event) {
-        console.log("Cuepoints changed: ");
-        console.log(event.getStreamData());
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.STARTED,
-      function(event) {
-        self.broadcast_('started');
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.FIRST_QUARTILE,
-      function(event) {
-        self.broadcast_('firstQuartile');
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.MIDPOINT,
-      function(event) {
-        self.broadcast_('midpoint');
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.THIRD_QUARTILE,
-      function(event) {
-        self.broadcast_('thirdQuartile');
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.COMPLETE,
-      function(event) {
-        self.broadcast_('complete');
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.AD_BREAK_STARTED,
-      function(event) {
-        self.adIsPlaying_ = true;
-        document.getElementById('ad-ui').style.display = 'block';
-        self.broadcast_('adBreakStarted');
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.AD_BREAK_ENDED,
-      function(event) {
-        self.adIsPlaying_ = false;
-        document.getElementById('ad-ui').style.display = 'none';
-        self.broadcast_('adBreakEnded');
-        if (self.seekToTimeAfterAdBreak_ > 0) {
-          self.seek_(self.seekToTimeAfterAdBreak_);
-          self.seekToTimeAfterAdBreak_ = 0;
-        }
-      },
-      false);
-  this.streamManager_.addEventListener(
-      google.ima.dai.api.StreamEvent.Type.AD_PROGRESS,
-      function(event) {
-        const adData = event.getStreamData().adProgressData;
-        document.getElementById('ad-position').innerHTML
-          = adData.adPosition;
-        document.getElementById('total-ads').innerHTML
-          = adData.totalAds;
-        document.getElementById('time-value').innerHTML
-          = Math.ceil(parseFloat(adData.duration)
-            - parseFloat(adData.currentTime));
-        document.getElementById('ad-ui').style.display = 'block';
-      },
-      false);
-};
-
-
-/**
- * Gets content time for the stream.
- * @returns {number} The content time.
- * @private
- */
-Player.prototype.getContentTime_ = function() {
-  return this.streamManager_
-      .contentTimeForStreamTime(this.mediaElement_.currentTime);
-};
-
-
-/**
- * Sends messages to all connected sender apps.
- * @param {string} message Message to be sent to senders.
- * @private
- */
-Player.prototype.broadcast_ = function(message) {
-  if (this.imaMessageBus_ && this.imaMessageBus_.broadcast) {
-    this.imaMessageBus_.broadcast(message);
   }
-};
 
-
-/**
- * Starts receiver manager which tracks playback of the stream.
- */
-Player.prototype.start = function() {
-  this.receiverManager_.start();
-};
-
-/**
- * Called when a sender disconnects from the app.
- * @param {cast.receiver.CastReceiverManager.SenderDisconnectedEvent} event
- */
-Player.prototype.onSenderDisconnected = function(event) {
-  console.log('onSenderDisconnected');
-  // When the last or only sender is connected to a receiver,
-  // tapping Disconnect stops the app running on the receiver.
-  if (this.receiverManager_.getSenders().length === 0 &&
-      event.reason ===
-          cast.receiver.system.DisconnectReason.REQUESTED_BY_SENDER) {
-    this.receiverManager_.stop();
-  }
-};
-
-
-/**
- * Called when we receive a LOAD message from the sender.
- * @param {!cast.receiver.MediaManager.Event} event The load event.
- */
-Player.prototype.onLoad = function(event) {
-  /*
-   * imaRequest data contains:
-   *   for Live requests:
-   *     {
-   *       assetKey: <ASSET_KEY>
-   *     }
-   *   for VOD requests:
-   *     {
-   *       contentSourceId: <CMS_ID>,
-   *       videoID: <VIDEO_ID>
-   *     }
+  /**
+   * Attaches message interceptors and event listeners to connet IMA to CAF.
+   * @private
    */
-  const imaRequestData = event.data.media.customData;
-  this.startTime_ = imaRequestData.startTime;
-  this.streamFormat_ = imaRequestData.format ||
-      google.ima.dai.api.StreamRequest.StreamFormat.HLS;
-  this.needsCredentials_ = imaRequestData.needsCredentials;
-  if (imaRequestData.assetKey) {
-    this.streamRequest =
-      new google.ima.dai.api.LiveStreamRequest(imaRequestData);
-  } else if (imaRequestData.contentSourceId) {
-    this.streamRequest =
-      new google.ima.dai.api.VODStreamRequest(imaRequestData);
+  attachPlayerManagerCallbacks_() {
+    // This intercepts the CAF load process, to load the IMA stream manager and
+    // make a DAI stream request. It then injests the stream URL into the
+    // original LOAD message, before passing it to CAF
+    this.playerManager_.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD, (request) => {
+          return this.initializeStreamManager_(request);
+        });
+
+    // This intercepts CAF seek requests to cancel them in the case that an ad
+    // is playing, and to modify them to enable snapback
+    this.playerManager_.setMessageInterceptor(
+        cast.framework.messages.MessageType.SEEK, (seekRequest) => {
+          return this.processSeekRequest_(seekRequest);
+        });
+
+    // This passes ID3 events from the stream to the IMA to allow for updating
+    // stream events on the fly in live streams
+    this.playerManager_.addEventListener(
+        cast.framework.events.EventType.ID3, (event) => {
+          // pass ID3 events from the stream to IMA to update live stream
+          // cuepoints
+          this.streamManager_.processMetadata(
+              'ID3', event.segmentData, event.timestamp);
+        });
   }
-  this.streamManager_.requestStream(this.streamRequest);
-  document.getElementById('splash').style.display = 'none';
-};
 
+  /**
+   * Attaches IMA event managers
+   * @private
+   */
+  attachStreamManagerListeners_() {
+    // This fires at the beginning of each ad break
+    this.streamManager_.addEventListener(
+        google.ima.dai.api.StreamEvent.Type.AD_BREAK_STARTED, (event) => {
+          this.startAdBreak_();
+        });
+    // This fires at the end of each ad break
+    this.streamManager_.addEventListener(
+        google.ima.dai.api.StreamEvent.Type.AD_BREAK_ENDED, (event) => {
+          this.endAdBreak_();
+        });
+    // This fires periodically while ads are playing
+    this.streamManager_.addEventListener(
+        google.ima.dai.api.StreamEvent.Type.AD_PROGRESS, (event) => {
+          this.updateAdProgress_(event);
+        });
 
-/**
- * Processes the SEEK event from the sender.
- * @param {!cast.receiver.MediaManager.Event} event The seek event.
- * @this {Player}
- */
-Player.prototype.onSeek = function(event) {
-  const currentTime = event.data.currentTime;
-  this.snapback_(currentTime);
-  this.mediaManager_.broadcastStatus(true, event.data.requestId);
-};
+    // Log the quartile events to the console for debugging
+    const quartileEvents = [
+      google.ima.dai.api.StreamEvent.Type.STARTED,
+      google.ima.dai.api.StreamEvent.Type.FIRST_QUARTILE,
+      google.ima.dai.api.StreamEvent.Type.MIDPOINT,
+      google.ima.dai.api.StreamEvent.Type.THIRD_QUARTILE,
+      google.ima.dai.api.StreamEvent.Type.COMPLETE
+    ];
+    this.streamManager_.addEventListener(quartileEvents, (event) => {
+          console.log(`IMA SDK Event: ${event.type}`);
+        }, false);
+  }
 
+  /**
+   * initializes the IMA StreamManager and issues a stream request.
+   * @param {!Object} request - The request data object from the CAF sender
+   * @return {!Promise<!Object>} - The request object with added stream information
+   * @private
+   */
+  initializeStreamManager_(request) {
+    return new Promise((resolve, reject) => {
+      // Set media info and resolve promise on successful stream request
+      this.streamManager_.addEventListener(
+          google.ima.dai.api.StreamEvent.Type.LOADED, (event) => {
+            this.broadcast(
+                'Stream request successful. Loading stream...');
+            request.media.contentUrl = event.getStreamData().url;
+            request.media.subtitles = event.getStreamData().subtitles;
+            resolve(request);
+          }, false);
 
-/**
- * Loads stitched ads+content stream.
- * @param {string} url of the stream.
- */
-Player.prototype.onStreamDataReceived = function(url) {
-  cast.player.api.setLoggerLevel(cast.player.api.LoggerLevel.DEBUG);
-  const self = this;
-  const currentTime = this.startTime_ > 0 ? this.streamManager_
-    .streamTimeForContentTime(this.startTime_) : 0;
-  this.broadcast_('start time: ' + currentTime);
+      // Prepare backup stream and resolve promise on stream request error
+      this.streamManager_.addEventListener(
+          google.ima.dai.api.StreamEvent.Type.ERROR, (event) => {
+            this.broadcast(
+                'Stream request failed. Loading backup stream...');
+            request.media.contentUrl = this.backupStream_;
+            resolve(request);
+          }, false);
 
-  const host = new cast.player.api.Host({
-    'url': url,
-    'mediaElement': this.mediaElement_
-  });
-  this.broadcast_('onStreamDataReceived: ' + url);
+      // Request Stream
+      const imaRequestData = request.media.customData;
+      this.startTime_ = imaRequestData.startTime;
+      const streamRequest = (imaRequestData.assetKey) ?
+          new google.ima.dai.api.LiveStreamRequest(imaRequestData) :
+          new google.ima.dai.api.VODStreamRequest(imaRequestData);
+      this.streamManager_.requestStream(streamRequest);
+      document.getElementById('splash').style.display = 'none';
 
-  const errorCallback = function(errorCode, requestStatus) {
-    console.log('Error: ' + errorCode);
-    console.log(requestStatus);
-  };
-  const processMetadataCallback = function(type, data, timestamp) {
-    self.streamManager_.processMetadata(type, data, timestamp);
-  };
-  const updateManifestRequestInfoCallback = function(requestInfo) {
-    if (!requestInfo.url) {
-      requestInfo.url = host.url;
+      // For VOD Streams, update start time on media element
+      if (this.startTime_ &&
+          request.media.streamType ===
+              cast.framework.messages.StreamType.BUFFERED) {
+        this.mediaElement_.currentTime =
+            this.streamManager_.streamTimeForContentTime(this.startTime_);
+      }
+    });
+  }
+
+  /**
+   * Intercepts requests to seek and injects necessary information for snapback.
+   * Also prevents seeking while ads are playing.
+   * @param {!Object} seekRequest - A CAF seek request
+   * @return {!Object} - A potentially modified CAF seek request
+   * @private
+   */
+  processSeekRequest_(seekRequest) {
+    const seekTo = seekRequest.currentTime;
+    const previousCuepoint =
+        this.streamManager_.previousCuePointForStreamTime(seekTo);
+    if (this.adIsPlaying_) {
+      // effectively cancels seek request
+      seekRequest.currentTime = this.mediaElement_.currentTime;
+    } else if (!previousCuepoint.played) {
+      // Adding 0.1 to cuepoint start time because of bug where stream
+      // freezes when seeking to certain times in VOD streams.
+      seekRequest.currentTime = previousCuepoint.start + 0.1;
+      this.seekToTimeAfterAdBreak_ = seekTo;
     }
-    if (self.needsCredentials_) {
-      requestInfo.withCredentials = true;
+    return seekRequest;
+  }
+
+  /**
+   * Sets flags and UI at the start of an ad break.
+   * @private
+   */
+  startAdBreak_() {
+    this.adIsPlaying_ = true;
+    document.getElementById('ad-ui').style.display = 'block';
+    this.broadcast('adBreakStarted');
+  }
+
+  /**
+   * Sets flags and UI and triggers snapback at the end of an ad break.
+   * @private
+   */
+  endAdBreak_() {
+    this.adIsPlaying_ = false;
+    document.getElementById('ad-ui').style.display = 'none';
+    this.broadcast('adBreakEnded');
+    // process any pending snapback request
+    if (this.seekToTimeAfterAdBreak_ != -1) {
+      this.seek(this.seekToTimeAfterAdBreak_);
+      this.seekToTimeAfterAdBreak_ = -1;
     }
-  };
-  const updateLicenseRequestInfoCallback = function(requestInfo) {
-    if (self.needsCredentials_) {
-      requestInfo.withCredentials = true;
+  }
+
+  /**
+   * Updates ad UI to display progress in ad break.
+   * @param {!Object} event - The ad progress event from IMA
+   * @private
+   */
+  updateAdProgress_(event) {
+    const adData = event.getStreamData().adProgressData;
+    document.getElementById('ad-position').textContext =
+        parseInt(adData.adPosition, 10);
+    document.getElementById('total-ads').textContext =
+        parseInt(adData.totalAds, 10);
+    document.getElementById('time-value').textContext = Math.ceil(
+        parseFloat(adData.duration) - parseFloat(adData.currentTime));
+    document.getElementById('ad-ui').style.display = 'block';
+  }
+
+  /**
+   * Seeks video playback to specified time if not playing an ad.
+   * @param {number} time - The target stream time in seconds, including ads.
+   */
+  seek(time) {
+    if (time > 0 && !this.adIsPlaying_) {
+      this.mediaElement_.currentTime = time;
+      this.broadcast('Seeking to: ' + time);
     }
-  };
-  const updateSegmentRequestInfoCallback = function(requestInfo) {
-    if (self.needsCredentials_) {
-      requestInfo.withCredentials = true;
-    }
-  };
-
-  host.onError = errorCallback;
-  host.processMetadata = processMetadataCallback;
-  host.updateManifestRequestInfo = updateManifestRequestInfoCallback;
-  host.updateLicenseRequestInfo = updateLicenseRequestInfoCallback;
-  host.updateSegmentRequestInfo = updateSegmentRequestInfoCallback;
-
-  let protocol;
-  switch (this.streamFormat_) {
-    case google.ima.dai.api.StreamRequest.StreamFormat.DASH:
-      protocol = cast.player.api.CreateDashStreamingProtocol(host);
-      break;
-    case google.ima.dai.api.StreamRequest.StreamFormat.HLS:
-      protocol = cast.player.api.CreateHlsStreamingProtocol(host);
-      break;
-    default:
-      console.error('Unsupported stream format: ' + this.streamFormat_);
-      break;
   }
-  this.castPlayer_ = new cast.player.api.Player(host);
-  this.castPlayer_.load(protocol, currentTime);
-  if (this.subtitles[0] && this.subtitles[0].ttml) {
-    this.castPlayer_.enableCaptions(true, 'ttml', this.subtitles[0].ttml);
-  }
-};
 
-/**
- * Bookmarks content so stream will return to this location if revisited.
- * @private
- */
-Player.prototype.bookmark_ = function() {
-  this.broadcast_('Current Time: ' + this.mediaElement_.currentTime);
-  const bookmarkTime = this.streamManager_
-    .contentTimeForStreamTime(this.mediaElement_.currentTime);
-  this.broadcast_('bookmark,' + bookmarkTime);
-};
-
-/**
- * Seeks player to location.
- * @param {number} time The time to seek to in seconds.
- * @private
- */
-Player.prototype.seek_ = function(time) {
-  if (this.adIsPlaying_) {
-    return;
+  /**
+   * Sets a bookmark to a specific time on future playback.
+   * @param {number} time - The target stream time in seconds, including ads.
+   */
+  bookmark(time) {
+    this.startTime_ = time;
   }
-  this.mediaElement_.currentTime = time;
-  this.broadcast_('Seeking to: ' + time);
-};
 
-/**
- * Seeks player to location and plays last ad break if it has not been
- * seen already.
- * @param {number} time The time to seek to in seconds.
- * @private
- */
-Player.prototype.snapback_ = function(time) {
-  const previousCuepoint =
-    this.streamManager_.previousCuePointForStreamTime(time);
-  console.log(previousCuepoint);
-  const played = previousCuepoint.played;
-  if (played) {
-    this.seek_(time);
-  } else {
-    // Adding 0.1 to cuepoint start time because of bug where stream freezes
-    // when seeking to certain times in VOD streams.
-    this.seek_(previousCuepoint.start + 0.1);
-    this.seekToTimeAfterAdBreak_ = time;
+  /**
+   * Gets the current timestamp in the stream, not including ads.
+   * @return {number} - The stream time in seconds, without ads.
+   */
+  getContentTime() {
+    const currentTime = this.mediaElement_.currentTime;
+    return this.streamManager_.contentTimeForStreamTime(currentTime);
   }
-};
+
+  /**
+   * Broadcasts a message to all attached CAF senders
+   * @param {string} message - The message to be sent to attached senders
+   */
+  broadcast(message) {
+    console.log(message);
+    this.castContext_.sendCustomMessage(NAMESPACE, undefined, message);
+  }
+}
