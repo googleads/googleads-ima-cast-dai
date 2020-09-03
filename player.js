@@ -152,6 +152,33 @@ class Player {
           this.streamManager_.processMetadata(
               'ID3', event.segmentData, event.timestamp);
         });
+
+    this.playerManager_.addEventListener(
+        [
+          cast.framework.events.EventType.TIMED_METADATA_ENTER,
+          cast.framework.events.EventType.TIMED_METADATA_CHANGED,
+          cast.framework.events.EventType.TIMED_METADATA_EXIT,
+        ],
+        (event) => this.handleTimedMetadataEvent_(event));
+  }
+
+  /**
+   * Handles timedmetadata updates from the player manager.
+   * @param {!cast.framework.events.TimedMetadataEvent} event
+   * @private
+   */
+  handleTimedMetadataEvent_(event) {
+    if (!event.timedMetadataInfo) {
+      return;
+    }
+    if (event.timedMetadataInfo.dashTimedMetadata &&
+        event.timedMetadataInfo.dashTimedMetadata.eventElement) {
+      this.streamManager_.processMetadata(
+          event.timedMetadataInfo.dashTimedMetadata.schemeIdUri,
+          event.timedMetadataInfo.dashTimedMetadata.eventElement.getAttribute(
+              'messageData'),
+          event.timedMetadataInfo.startTime);
+    }
   }
 
   /**
@@ -203,6 +230,9 @@ class Player {
                 'Stream request successful. Loading stream...');
             request.media.contentUrl = event.getStreamData().url;
             request.media.subtitles = event.getStreamData().subtitles;
+            if (event.getStreamData().manifestFormat.toLowerCase() == 'dash') {
+              request.media.contentType = 'application/dash+xml';
+            }
             resolve(request);
           }, false);
 
