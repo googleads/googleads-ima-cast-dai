@@ -108,8 +108,7 @@ class Player {
     switch (method) {
       case 'bookmark':
         const time = parseFloat(messageArray[1]);
-        const bookmarkTime =
-            this.streamManager_.contentTimeForStreamTime(time);
+        const bookmarkTime = this.streamManager_.contentTimeForStreamTime(time);
         this.broadcast('bookmark,' + bookmarkTime);
         this.bookmark(time);
         break;
@@ -211,14 +210,15 @@ class Player {
       google.ima.dai.api.StreamEvent.Type.COMPLETE
     ];
     this.streamManager_.addEventListener(quartileEvents, (event) => {
-          console.log(`IMA SDK Event: ${event.type}`);
-        }, false);
+      console.log(`IMA SDK Event: ${event.type}`);
+    }, false);
   }
 
   /**
    * initializes the IMA StreamManager and issues a stream request.
    * @param {!Object} request - The request data object from the CAF sender
-   * @return {!Promise<!Object>} - The request object with added stream information
+   * @return {!Promise<!Object>} - The request object with added stream
+   *     information
    * @private
    */
   initializeStreamManager_(request) {
@@ -226,8 +226,7 @@ class Player {
       // Set media info and resolve promise on successful stream request
       this.streamManager_.addEventListener(
           google.ima.dai.api.StreamEvent.Type.LOADED, (event) => {
-            this.broadcast(
-                'Stream request successful. Loading stream...');
+            this.broadcast('Stream request successful. Loading stream...');
             request.media.contentUrl = event.getStreamData().url;
             request.media.subtitles = event.getStreamData().subtitles;
             if (event.getStreamData().manifestFormat.toLowerCase() == 'dash') {
@@ -239,8 +238,7 @@ class Player {
       // Prepare backup stream and resolve promise on stream request error
       this.streamManager_.addEventListener(
           google.ima.dai.api.StreamEvent.Type.ERROR, (event) => {
-            this.broadcast(
-                'Stream request failed. Loading backup stream...');
+            this.broadcast('Stream request failed. Loading backup stream...');
             request.media.contentUrl = this.backupStream_;
             resolve(request);
           }, false);
@@ -323,8 +321,8 @@ class Player {
         parseInt(adData.adPosition, 10);
     document.getElementById('total-ads').textContext =
         parseInt(adData.totalAds, 10);
-    document.getElementById('time-value').textContext = Math.ceil(
-        parseFloat(adData.duration) - parseFloat(adData.currentTime));
+    document.getElementById('time-value').textContext =
+        Math.ceil(parseFloat(adData.duration) - parseFloat(adData.currentTime));
     document.getElementById('ad-ui').style.display = 'block';
   }
 
