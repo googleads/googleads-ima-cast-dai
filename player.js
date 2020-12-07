@@ -1,4 +1,4 @@
-'use strict';
+goog.module('google3.personalization.zipit.frontend.javascript.external-javascript.ads.interactivemedia.sdk.dai.sample.google_cast.player');
 
 const NAMESPACE = 'urn:x-cast:com.google.ads.ima.cast';
 
