@@ -1,4 +1,3 @@
-goog.module('google3.javascript.ads.interactivemedia.sdk.dai.sample.google_cast.player');
 
 const NAMESPACE = 'urn:x-cast:com.google.ads.ima.cast';
 
