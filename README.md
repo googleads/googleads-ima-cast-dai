@@ -23,8 +23,7 @@ https://developers.google.com/interactive-media-ads/docs/sdks/cast/dai/.
 ### Announcements and Updates
 
 For API and client library updates and news, please follow our
-[Google+ Ads Developers page](https://plus.google.com/+GoogleAdsDevelopers/posts)
-and our [Google Ads Developers blog](http://googleadsdeveloper.blogspot.com/)
+[Google Ads Developers blog](http://googleadsdeveloper.blogspot.com/)
 
 Copyright 2020 Google LLC
 
