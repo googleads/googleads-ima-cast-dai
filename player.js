@@ -56,7 +56,7 @@ class Player {
     this.startTime_ = 0;
 
     /**
-     * Stores a flag to identify whether an ad is currently playing.
+     * Stores an option to identify whether an ad is currently playing.
      * @type {boolean}
      * @private
      */
