@@ -1,30 +1,61 @@
-<!DOCTYPE html>
-<html manifest="nocache.mf">
+<html>
 <head>
-  <title>Receiver Demo</title>
-  <script type="text/javascript" src="//www.gstatic.com/cast/sdk/libs/receiver/2.0.0/cast_receiver.js"></script>
-  <script type="text/javascript" src="//www.gstatic.com/cast/sdk/libs/mediaplayer/1.0.0/media_player.js"></script>
-  <script type="text/javascript" src="player.js"></script>
-  <script type="text/javascript" src="//imasdk.googleapis.com/js/sdkloader/ima3_dai.js"></script>
+  <script type="text/javascript" src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <script src="//www.gstatic.com/cast/sdk/libs/devtools/debug_layer/caf_receiver_logger.js"></script>
+  <script src="//imasdk.googleapis.com/js/sdkloader/cast_dai.js"></script>
 </head>
 <body>
-  <div id='splash' style='position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: white;'>
-    <div style='text-align: center; position: absolute; top: 50%; left: 50%;'>
-      <span>IMA SDK</span>
-    </div>
-  </div>
-  <video id='mediaElement' autoplay='true' style='width: 100%; height: 90%;overflow-y: hidden;'></video>
-  <div id='ad-ui' style='position: fixed; bottom:10px; background: white; display: none;'>Ad
-    <span id='ad-position'>1</span> of
-    <span id='total-ads'>1</span> Remaining time:
-    <span id='time-value'>0</span> s
-  </div>
-  <div id='watermark_wrapper' style='position: absolute; left: 0; top: 50px; right: 0; bottom: 0; opacity: 0.5; z-index: 99; font-size: xx-large; text-align: center;'>
-    SAMPLE IMA DAI RECEIVER - NOT FOR PRODUCTION USE
-  </div>
+  <cast-media-player></cast-media-player>
   <script>
-    var player = new Player(document.getElementById('mediaElement'));
-    player.start();
+    const LOG_TAG = 'MyCustomDAIReceiver';
+    const castContext = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = c.getPlayerManager();
+    const mediaElement = document.getElementsByTagName("cast-media-player")[0].getMediaElement();
+    const streamManager = new google.ima.cast.dai.api.StreamManager(mediaElement);
+
+    const getStreamRequest = (request) => {
+      const imaRequestData = request.media.customData;
+      let streamRequest = null;
+      if (imaRequestData.assetKey) {
+        // Live stream
+        streamRequest = new google.ima.cast.dai.api.LiveStreamRequest();
+        streamRequest.assetKey = imaRequestData.assetKey;
+      } else if (imaRequestData.contentSourceId) {
+        // VOD stream
+        streamRequest = new google.ima.cast.dai.api.VODStreamRequest();
+        streamRequest.contentSourceId = imaRequestData.contentSourceId;
+        streamRequest.videoId = imaRequestData.videoId;
+      }
+      if (streamRequest && imaRequestData.ApiKey) {
+        streamRequest.ApiKey = imaRequestData.ApiKey;
+      }
+      if (streamRequest && imaRequestData.senderCanSkip) {
+        streamRequest.senderCanSkip = imaRequestData.senderCanSkip;
+      }
+      return streamRequest;
+    };
+    
+    context.addEventListener(cast.framework.system.EventType.READY, () => {
+      if (!castDebugLogger.debugOverlayElement_) {
+        // Enable debug logger and show a 'DEBUG MODE' overlay at top left corner.
+        castDebugLogger.setEnabled(true);
+      }
+    });
+
+    playerManager.setMessageInterceptor(
+        cast.framework.messages.MessageType.LOAD, (request) => {
+          return streamManager.requestStream(request, getStreamRequest(request))
+              .then((request) => {
+                castDebugLogger.info(LOG_TAG, 'Stream Loaded:', request.media.contentUrl);
+                return Promise.resolve(request);
+              })
+              .catch((error) => {
+                castDebugLogger.error(LOG_TAG, 'Stream Load Failed');
+                return Promise.resolve(request);
+              });
+        });
+
+    castContext.start();
   </script>
 </body>
 </html>
