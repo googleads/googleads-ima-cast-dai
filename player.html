@@ -9,7 +9,7 @@
   <script>
     const LOG_TAG = 'MyCustomDAIReceiver';
     const castContext = cast.framework.CastReceiverContext.getInstance();
-    const playerManager = c.getPlayerManager();
+    const playerManager = castContext.getPlayerManager();
     const mediaElement = document.getElementsByTagName("cast-media-player")[0].getMediaElement();
     const streamManager = new google.ima.cast.dai.api.StreamManager(mediaElement);
 
